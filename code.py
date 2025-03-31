@@ -1,15 +1,12 @@
 import re
 import pandas as pd
-import pyttsx3
 from sklearn import preprocessing
-from sklearn.tree import DecisionTreeClassifier, _tree
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.ensemble import GradientBoostingClassifier
 import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.model_selection import cross_val_score
-from sklearn.svm import SVC
 import csv
-import warnings
-warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 # Load the training and testing data
 training = pd.read_csv('Training.csv')
@@ -32,36 +29,28 @@ y = le.transform(y)
 
 # Split the data into train and test sets
 x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=0.33, random_state=42)
-testx = testing[cols]
-testy = testing['prognosis']
-testy = le.transform(testy)
 
-# DecisionTreeClassifier Model
-clf1 = DecisionTreeClassifier()
-clf = clf1.fit(x_train, y_train)
+# Gradient Boosting Classifier Model
+gbc = GradientBoostingClassifier()
+gbc.fit(x_train, y_train)
 
-# Cross-validation to check accuracy
-scores = cross_val_score(clf, x_test, y_test, cv=3)
-print(f"Decision Tree Classifier score: {scores.mean()}")
+# Train score
+train_score = gbc.score(x_train, y_train)
+print(f"Gradient Boosting Classifier score: {train_score}")
 
-# Support Vector Classifier Model
-model = SVC()
-model.fit(x_train, y_train)
-print("SVM score: ", model.score(x_test, y_test))
-
-# Feature importance from the Decision Tree
-importances = clf.feature_importances_
-indices = np.argsort(importances)[::-1]
-features = cols
-
-# Text-to-speech initialization
-def readn(nstr):
-    engine = pyttsx3.init()
-    engine.setProperty('voice', "english+f5")
-    engine.setProperty('rate', 130)
-    engine.say(nstr)
-    engine.runAndWait()
-    engine.stop()
+# Function for secondary prediction
+def sec_predict(symptoms_exp):
+    df = pd.read_csv('Training.csv')
+    X = df.iloc[:, :-1]
+    y = df['prognosis']
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=20)
+    rf_clf = DecisionTreeClassifier()
+    rf_clf.fit(X_train, y_train)
+    symptoms_dict = {symptom: index for index, symptom in enumerate(X.columns)}
+    input_vector = np.zeros(len(symptoms_dict))
+    for item in symptoms_exp:
+        input_vector[symptoms_dict[item]] = 1
+    return rf_clf.predict([input_vector])
 
 # Dictionaries to store severity, description, and precaution data
 severityDictionary = dict()
@@ -113,14 +102,12 @@ def getprecautionDict():
             _prec = {row[0]: [row[1], row[2], row[3], row[4]]}
             precautionDictionary.update(_prec)
 
-
 # Function to collect user info and greet
 def getInfo():
     print("-----------------------------------AI Medical ChatBot-----------------------------------")
     print("\nYour Name? \t\t\t\t", end="-> ")
     name = input("")
     print("Hello, ", name)
-
 
 # Function to check for a pattern match in symptoms
 def check_pattern(dis_list, inp):
@@ -134,131 +121,44 @@ def check_pattern(dis_list, inp):
     else:
         return 0, []
 
+# Function for disease prediction
+def disease_prediction(symptoms_exp):
+    input_vector = np.zeros(len(x.columns))
+    for symptom in symptoms_exp:
+        input_vector[x.columns.get_loc(symptom)] = 1
+    prediction = gbc.predict([input_vector])
+    return le.inverse_transform(prediction)[0]
 
-# Function for secondary prediction
-def sec_predict(symptoms_exp):
-    df = pd.read_csv('Training.csv')
-    X = df.iloc[:, :-1]
-    y = df['prognosis']
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=20)
-
-    rf_clf = DecisionTreeClassifier()
-    rf_clf.fit(X_train, y_train)
-
-    symptoms_dict = {symptom: index for index, symptom in enumerate(X)}
-    input_vector = np.zeros(len(symptoms_dict))
-
-    for item in symptoms_exp:
-        input_vector[[symptoms_dict[item]]] = 1
-
-    return rf_clf.predict([input_vector])
-
-
-# Function to print the disease prediction
-def print_disease(node):
-    node = node[0]
-    val = node.nonzero()
-    disease = le.inverse_transform(val[0])
-    return list(map(lambda x: x.strip(), list(disease)))
-
-
-# Recursive function to traverse the decision tree and predict the disease
-def tree_to_code(tree, feature_names):
-    tree_ = tree.tree_
-    feature_name = [
-        feature_names[i] if i != _tree.TREE_UNDEFINED else "undefined!"
-        for i in tree_.feature
-    ]
-
-    chk_dis = ",".join(feature_names).split(",")
-    symptoms_present = []
-
+# Main function
+def main():
+    getInfo()
+    symptoms_exp = set()
     while True:
-        print("\nEnter the symptom you are experiencing  \t\t", end="-> ")
-        disease_input = input("")
-        conf, cnf_dis = check_pattern(chk_dis, disease_input)
-        if conf == 1:
-            print("Searches related to input: ")
-            for num, it in enumerate(cnf_dis):
-                print(num, ") ", it)
-            if num != 0:
-                print(f"Select the one you meant (0 - {num}):  ", end="")
-                conf_inp = int(input(""))
-            else:
-                conf_inp = 0
-
-            disease_input = cnf_dis[conf_inp]
+        symptom = input("Enter the symptom you are experiencing (or type 'done' if finished) \t\t-> ").strip().lower()
+        if symptom == 'done':
             break
+        elif symptom in symptoms_dict:
+            symptoms_exp.add(symptom)
+            days = input(f"For how many days have you experienced {symptom}? -> ")
         else:
             print("Enter a valid symptom.")
+    if not symptoms_exp:
+        print("No symptoms entered. Exiting.")
+        return
+    
+    disease = disease_prediction(symptoms_exp)
+    print(f"\033[1mYou may have {disease}\033[0m")  # Disease in bold
+    print(f"{description_list.get(disease, 'No description available.')}")
+    print(f"Severity: {severityDictionary.get(disease, 'Unknown')}")
+    print("Take the following precautions:")
+    for idx, precaution in enumerate(precautionDictionary.get(disease, []), 1):
+        print(f"{idx}) {precaution}")
 
-    while True:
-        try:
-            num_days = int(input("Okay. For how many days? : "))
-            break
-        except:
-            print("Enter a valid input.")
-
-    def recurse(node, depth):
-        indent = "  " * depth
-        if tree_.feature[node] != _tree.TREE_UNDEFINED:
-            name = feature_name[node]
-            threshold = tree_.threshold[node]
-
-            if name == disease_input:
-                val = 1
-            else:
-                val = 0
-            if val <= threshold:
-                recurse(tree_.children_left[node], depth + 1)
-            else:
-                symptoms_present.append(name)
-                recurse(tree_.children_right[node], depth + 1)
-        else:
-            present_disease = print_disease(tree_.value[node])
-            red_cols = reduced_data.columns
-            symptoms_given = red_cols[reduced_data.loc[present_disease].values[0].nonzero()]
-            print("Are you experiencing any of these symptoms?")
-            symptoms_exp = []
-            for syms in list(symptoms_given):
-                inp = ""
-                print(syms, "? : ", end='')
-                while True:
-                    inp = input("")
-                    if inp == "yes" or inp == "no":
-                        break
-                    else:
-                        print("Please provide proper answers (yes/no) : ", end="")
-                if inp == "yes":
-                    symptoms_exp.append(syms)
-
-            second_prediction = sec_predict(symptoms_exp)
-            calc_condition(symptoms_exp, num_days)
-            if present_disease[0] == second_prediction[0]:
-                print("You may have ", present_disease[0])
-                print(description_list[present_disease[0]])
-            else:
-                print("You may have ", present_disease[0], " or ", second_prediction[0])
-                print(description_list[present_disease[0]])
-                print(description_list[second_prediction[0]])
-
-            precution_list = precautionDictionary[present_disease[0]]
-            print("Take the following precautions: ")
-            for i, j in enumerate(precution_list):
-                print(i + 1, ") ", j)
-
-    recurse(0, 1)
-
-
-# Load the data for severity, description, and precautions
-getSeverityDict()
-getDescription()
-getprecautionDict()
-
-# Get user information
-getInfo()
-
-# Start the disease prediction process
-tree_to_code(clf, cols)
-
-print("----------------------------------------------------------------------------------------")
+    second_prediction = sec_predict(symptoms_exp)
+    if disease != second_prediction[0]:
+        print(f"\033[1mAlternatively, you may have {second_prediction[0]}\033[0m")  # Alternative disease in bold
+if __name__ == "__main__":
+    getDescription()
+    getSeverityDict()
+    getprecautionDict()
+    main()
